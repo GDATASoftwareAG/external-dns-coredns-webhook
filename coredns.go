@@ -50,7 +50,6 @@ const (
 )
 
 type CoreDNSConfig struct {
-	dryRun                        bool
 	coreDNSPrefix                 string
 	domainFilter                  endpoint.DomainFilter
 	ownerID                       string
@@ -67,6 +66,7 @@ type coreDNSClient interface {
 type coreDNSProvider struct {
 	provider.BaseProvider
 	client coreDNSClient
+	dryRun bool
 	CoreDNSConfig
 }
 
@@ -252,7 +252,7 @@ func newETCDClient() (coreDNSClient, error) {
 }
 
 // NewCoreDNSProvider is a CoreDNS provider constructor
-func NewCoreDNSProvider(config CoreDNSConfig) (provider.Provider, error) {
+func NewCoreDNSProvider(config CoreDNSConfig, dryRun bool) (provider.Provider, error) {
 	client, err := newETCDClient()
 	if err != nil {
 		return nil, err
@@ -260,6 +260,7 @@ func NewCoreDNSProvider(config CoreDNSConfig) (provider.Provider, error) {
 
 	return coreDNSProvider{
 		client:        client,
+		dryRun:        dryRun,
 		CoreDNSConfig: config,
 	}, nil
 }
