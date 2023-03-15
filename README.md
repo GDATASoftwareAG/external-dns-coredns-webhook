@@ -1,9 +1,10 @@
-# ExternalDNS Plugin CoreDNS Provider
+# ExternalDNS Plugin CoreDNS Webhook
 
 
 ## Pre-filtering CoreDNS services based on ownerIDs
 
-If your are running external-dns in multi cluster, you can use `--coredns-pre-filter-external-owned-records` and `--txt-owner-id` to ignore external created services, for example from a different external-dns.
+If you are running external-dns in multi cluster, you can use `--coredns-pre-filter-external-owned-records` and 
+`--txt-owner-id` to ignore external created services, for example from a different external-dns.
 
 ## Custom attributes
 

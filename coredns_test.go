@@ -289,8 +289,8 @@ func TestRecordsAWithGroupServiceTranslation(t *testing.T) {
 	endpoints, _ := coredns.Records(context.Background())
 	if prop, ok := endpoints[0].GetProviderSpecificProperty(providerSpecificGroup); !ok {
 		t.Error("go no Group name")
-	} else if prop.Value != "test1" {
-		t.Errorf("got unexpected Group name: %s != %s", prop.Value, "test1")
+	} else if prop != "test1" {
+		t.Errorf("got unexpected Group name: %s != %s", prop, "test1")
 	}
 }
 

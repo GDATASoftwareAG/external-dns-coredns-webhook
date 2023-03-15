@@ -297,7 +297,7 @@ func (p coreDNSProvider) Records(_ context.Context) ([]*endpoint.Endpoint, error
 	}
 	for _, service := range services {
 		if p.preFilterExternalOwnedRecords && service.Text != "" {
-			if labels, err := endpoint.NewLabelsFromString(service.Text); err == nil && labels != nil {
+			if labels, err := endpoint.NewLabelsFromStringPlain(service.Text); err == nil && labels != nil {
 				if owner, exists := labels[endpoint.OwnerLabelKey]; exists && owner != p.ownerID {
 					log.Debugf(`Skipping coredns service %v because owner id does not match, found: "%s", required: "%s"`, service, owner, p.ownerID)
 					continue
@@ -379,7 +379,7 @@ func (p coreDNSProvider) ApplyChanges(_ context.Context, changes *plan.Changes) 
 
 				group := ""
 				if prop, ok := ep.GetProviderSpecificProperty(providerSpecificGroup); ok {
-					group = prop.Value
+					group = prop
 				}
 				service := Service{
 					Host:        target,

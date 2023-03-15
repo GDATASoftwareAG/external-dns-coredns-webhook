@@ -17,16 +17,13 @@ limitations under the License.
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
 	"os"
+	"sigs.k8s.io/external-dns/provider/webhook"
+	"time"
 
 	"github.com/alecthomas/kingpin"
 	log "github.com/sirupsen/logrus"
 	"sigs.k8s.io/external-dns/endpoint"
-	"sigs.k8s.io/external-dns/plan"
-	"sigs.k8s.io/external-dns/provider"
 )
 
 // Version is the current version of the app, generated at build time
@@ -34,96 +31,11 @@ var Version = "unknown"
 
 type Config struct {
 	CoreDNSConfig
-	dryRun    bool
-	logFormat string
-	LogLevel  string
-}
-
-type CoreDNSPlugin struct {
-	provider provider.Provider
-}
-
-type PropertyValuesEqualsRequest struct {
-	Name     string `json:"name"`
-	Previous string `json:"previous"`
-	Current  string `json:"current"`
-}
-
-type PropertiesValuesEqualsResponse struct {
-	Equals bool `json:"equals"`
-}
-
-func (p *CoreDNSPlugin) records(w http.ResponseWriter, req *http.Request) {
-	if req.Method == http.MethodGet { // records
-		log.Println("get records")
-		records, err := p.provider.Records(context.Background())
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(records)
-		return
-	} else if req.Method == http.MethodPost { // applychanges
-		log.Println("post applychanges")
-		// extract changes from the request body
-		var changes plan.Changes
-		if err := json.NewDecoder(req.Body).Decode(&changes); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		err := p.provider.ApplyChanges(context.Background(), &changes)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	log.Println("records: this should never happen")
-}
-
-func (p *CoreDNSPlugin) propertyValuesEquals(w http.ResponseWriter, req *http.Request) {
-	if req.Method == http.MethodGet { // propertyValuesEquals
-		log.Println("get propertyValuesEquals")
-		pve := PropertyValuesEqualsRequest{}
-		if err := json.NewDecoder(req.Body).Decode(&pve); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		b := p.provider.PropertyValuesEqual(pve.Name, pve.Previous, pve.Current)
-		r := PropertiesValuesEqualsResponse{
-			Equals: b,
-		}
-		out, _ := json.Marshal(&r)
-		w.Write(out)
-		return
-	}
-	log.Println("propertyValuesEquals: this should never happen")
-}
-
-func (p *CoreDNSPlugin) adjustEndpoints(w http.ResponseWriter, req *http.Request) {
-	if req.Method == http.MethodGet { // adjustEndpoints
-		log.Println("get adjustEndpoints")
-		var pve []*endpoint.Endpoint
-		if err := json.NewDecoder(req.Body).Decode(&pve); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		pve = p.provider.AdjustEndpoints(pve)
-		out, _ := json.Marshal(&pve)
-		w.Write(out)
-		return
-	}
-	log.Println("adjustEndpoints: this should never happen")
-}
-
-func (p *CoreDNSPlugin) root(w http.ResponseWriter, req *http.Request) {
-	header := w.Header()
-	header.Set("Vary", "Content-Type")
-	header.Set("Content-Type", "application/external.dns.plugin+json;version=1")
-	w.WriteHeader(200)
+	dryRun                      bool
+	logFormat                   string
+	LogLevel                    string
+	webhookProviderReadTimeout  time.Duration
+	webhookProviderWriteTimeout time.Duration
 }
 
 // allLogLevelsAsStrings returns all logrus levels as a list of strings
@@ -136,7 +48,7 @@ func allLogLevelsAsStrings() []string {
 }
 
 func (cfg *Config) ParseFlags(args []string) error {
-	app := kingpin.New("external-dns-coredns-plugin", "ExternalDNS CoreDNS plugin")
+	app := kingpin.New("external-dns-coredns-webhook", "ExternalDNS CoreDNS webhook")
 	app.Version(Version)
 	app.DefaultEnvars()
 	app.Flag("dry-run", "When enabled, prints DNS record changes rather than actually performing them (default: disabled)").
@@ -145,6 +57,11 @@ func (cfg *Config) ParseFlags(args []string) error {
 		Default("text").EnumVar(&cfg.logFormat, "text", "json")
 	app.Flag("log-level", "Set the level of logging. (default: info, options: panic, debug, info, warning, error, fatal").
 		Default("info").EnumVar(&cfg.LogLevel, allLogLevelsAsStrings()...)
+
+	app.Flag("webhook-provider-read-timeout", "The read timeout for the webhook provider in duration format (default: 5s)").
+		Default((time.Second * 5).String()).DurationVar(&cfg.webhookProviderReadTimeout)
+	app.Flag("webhook-provider-write-timeout", "The write timeout for the webhook provider in duration format (default: 5s)").
+		Default((time.Second * 5).String()).DurationVar(&cfg.webhookProviderWriteTimeout)
 
 	app.Flag("prefix", "Specify the prefix name").
 		Default("/skydns/").StringVar(&cfg.coreDNSPrefix)
@@ -171,7 +88,7 @@ func main() {
 	if err := cfg.ParseFlags(os.Args[1:]); err != nil {
 		log.Fatalf("flag parsing error: %v", err)
 	}
-	log.Infof("config: %s", cfg)
+	log.Infof("config: %v", cfg)
 
 	if cfg.logFormat == "json" {
 		log.SetFormatter(&log.JSONFormatter{})
@@ -191,17 +108,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen failed error: %v", err)
 	}
-	log.Info("start ExternalDNS coreDNS plugin")
-	p := CoreDNSPlugin{
-		provider: dnsProvider,
-	}
-
-	m := http.NewServeMux()
-	m.HandleFunc("/", p.root)
-	m.HandleFunc("/records", p.records)
-	m.HandleFunc("/propertyvaluesequals", p.propertyValuesEquals)
-	m.HandleFunc("/adjustendpoints", p.adjustEndpoints)
-	if err := http.ListenAndServe(":8888", m); err != nil {
-		log.Fatalf("listen failed error: %v", err)
-	}
+	log.Info("start ExternalDNS coreDNS webhook")
+	startedChan := make(chan struct{})
+	go webhook.StartHTTPApi(dnsProvider, startedChan, cfg.webhookProviderReadTimeout, cfg.webhookProviderWriteTimeout, "0.0.0.0:8888")
+	<-startedChan
 }
