@@ -16,7 +16,7 @@ jobs:
       - name: Prepare
         id: prep
         run: |
-          DOCKER_IMAGE=ghcr.io/gdatasoftwareag/external-dns-coredns-plugin
+          DOCKER_IMAGE=ghcr.io/gdatasoftwareag/external-dns-coredns-webhook
           VERSION=edge
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/}

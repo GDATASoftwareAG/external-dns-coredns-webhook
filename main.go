@@ -18,7 +18,9 @@ package main
 
 import (
 	"os"
+	"os/signal"
 	"sigs.k8s.io/external-dns/provider/webhook"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kingpin"
@@ -36,6 +38,7 @@ type Config struct {
 	LogLevel                    string
 	webhookProviderReadTimeout  time.Duration
 	webhookProviderWriteTimeout time.Duration
+	webhookProviderPort         string
 }
 
 // allLogLevelsAsStrings returns all logrus levels as a list of strings
@@ -62,6 +65,8 @@ func (cfg *Config) ParseFlags(args []string) error {
 		Default((time.Second * 5).String()).DurationVar(&cfg.webhookProviderReadTimeout)
 	app.Flag("webhook-provider-write-timeout", "The write timeout for the webhook provider in duration format (default: 5s)").
 		Default((time.Second * 5).String()).DurationVar(&cfg.webhookProviderWriteTimeout)
+	app.Flag("webhook-provider-port", "Webhook provider port (default: 0.0.0.0:8888)").
+		Default("0.0.0.0:8888").StringVar(&cfg.webhookProviderPort)
 
 	app.Flag("prefix", "Specify the prefix name").
 		Default("/skydns/").StringVar(&cfg.coreDNSPrefix)
@@ -108,8 +113,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen failed error: %v", err)
 	}
+
 	log.Info("start ExternalDNS coreDNS webhook")
 	startedChan := make(chan struct{})
-	go webhook.StartHTTPApi(dnsProvider, startedChan, cfg.webhookProviderReadTimeout, cfg.webhookProviderWriteTimeout, "0.0.0.0:8888")
+	go webhook.StartHTTPApi(dnsProvider, startedChan, cfg.webhookProviderReadTimeout, cfg.webhookProviderWriteTimeout, cfg.webhookProviderPort)
 	<-startedChan
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	sig := <-sigCh
+	log.Infof("shutting down server due to received signal: %v", sig)
 }
