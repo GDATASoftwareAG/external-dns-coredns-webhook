@@ -29,6 +29,8 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/external-dns/pkg/rfc2317"
+
 	log "github.com/sirupsen/logrus"
 	etcdcv3 "go.etcd.io/etcd/client/v3"
 
@@ -54,6 +56,7 @@ type CoreDNSConfig struct {
 	domainFilter                  endpoint.DomainFilter
 	ownerID                       string
 	preFilterExternalOwnedRecords bool
+	createPTR                     bool
 }
 
 // coreDNSClient is an interface to work with CoreDNS service records in etcd
@@ -342,6 +345,9 @@ func (p coreDNSProvider) Records(_ context.Context) ([]*endpoint.Endpoint, error
 			)
 			ep.Labels[randomPrefixLabel] = prefix
 			result = append(result, ep)
+		}
+		if p.createPTR {
+			arpaZone, err := rfc2317.CidrToInAddr(service.Fqdn)
 		}
 	}
 	return result, nil

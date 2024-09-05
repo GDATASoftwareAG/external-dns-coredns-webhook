@@ -19,9 +19,10 @@ package main
 import (
 	"os"
 	"os/signal"
-	"sigs.k8s.io/external-dns/provider/webhook"
 	"syscall"
 	"time"
+
+	"sigs.k8s.io/external-dns/provider/webhook"
 
 	"github.com/alecthomas/kingpin"
 	log "github.com/sirupsen/logrus"

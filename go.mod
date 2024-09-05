@@ -1,6 +1,6 @@
 module github.com/GDATASoftwareAG/external-dns-coredns-webhook
 
-go 1.20
+go 1.23
 
 require (
 	github.com/alecthomas/kingpin v2.2.6+incompatible
