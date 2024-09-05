@@ -1,6 +1,7 @@
 # ExternalDNS Plugin CoreDNS Webhook
 
 ## Commandline
+
 ```
 usage: external-dns-coredns-webhook [<flags>]
 
@@ -24,13 +25,27 @@ Flags:
                             Services are pre filter based on the txt-owner-id (default: false)
 ```
 
+## ENVs for Etcd
+
+| Name                 | Description                                                                        | Default                 |
+|----------------------|------------------------------------------------------------------------------------|-------------------------|
+| ETCD_URLS            | Optionally, can be used to configure the urls to connect to etcd, comma seperated. | "http://localhost:2379" |
+| ETCD_USERNAME        | Optionally, can be used to configure for authenticating to etcd.                   | ""                      | 
+| ETCD_PASSWORD        | Optionally, can be used to configure for authenticating to etcd.                   | ""                      |
+| ETCD_CA_FILE         | Optionally, can be used to configure TLS settings for etcd.                        | ""                      |
+| ETCD_CERT_FILE       | Optionally, can be used to configure TLS settings for etcd.                        | ""                      |
+| ETCD_KEY_FILE        | Optionally, can be used to configure TLS settings for etcd.                        | ""                      |
+| ETCD_TLS_SERVER_NAME | Optionally, can be used to configure TLS settings for etcd.                        | ""                      |
+| ETCD_TLS_INSECURE    | Optionally, To insecure handle connection use "true", default is false.            | ""                      |
+
 ## Pre-filtering CoreDNS services based on ownerIDs
 
-If you are running external-dns in multi cluster, you can use `--coredns-pre-filter-external-owned-records` and 
+If you are running external-dns in multi cluster, you can use `--coredns-pre-filter-external-owned-records` and
 `--txt-owner-id` to ignore external created services, for example from a different external-dns.
 
 ## Custom attributes
 
 Coredns offers currently a single custom attribute:
 
-* [Grouped](https://github.com/skynetservices/skydns#groups) records: `external-dns.alpha.kubernetes.io/coredns-group`
+* [Grouped](https://github.com/skynetservices/skydns#groups)
+  records: `external-dns.alpha.kubernetes.io/webhook-coredns-group`
