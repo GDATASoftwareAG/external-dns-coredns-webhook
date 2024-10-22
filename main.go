@@ -1,5 +1,5 @@
 /*
-Copyright 2023 G DATA Software AG.
+Copyright 2024 G DATA Software AG.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ package main
 import (
 	"os"
 	"os/signal"
-	"sigs.k8s.io/external-dns/provider/webhook"
+	webhookapi "sigs.k8s.io/external-dns/provider/webhook/api"
 	"syscall"
 	"time"
 
@@ -116,7 +116,7 @@ func main() {
 
 	log.Info("start ExternalDNS coreDNS webhook")
 	startedChan := make(chan struct{})
-	go webhook.StartHTTPApi(dnsProvider, startedChan, cfg.webhookProviderReadTimeout, cfg.webhookProviderWriteTimeout, cfg.webhookProviderPort)
+	go webhookapi.StartHTTPApi(dnsProvider, startedChan, cfg.webhookProviderReadTimeout, cfg.webhookProviderWriteTimeout, cfg.webhookProviderPort)
 	<-startedChan
 
 	sigCh := make(chan os.Signal, 1)
