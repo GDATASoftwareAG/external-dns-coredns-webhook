@@ -19,9 +19,10 @@ package main
 import (
 	"os"
 	"os/signal"
-	webhookapi "sigs.k8s.io/external-dns/provider/webhook/api"
 	"syscall"
 	"time"
+
+	webhookapi "sigs.k8s.io/external-dns/provider/webhook/api"
 
 	"github.com/alecthomas/kingpin"
 	log "github.com/sirupsen/logrus"
@@ -87,7 +88,7 @@ func main() {
 	// instantiate the config
 	cfg := Config{
 		CoreDNSConfig: CoreDNSConfig{
-			domainFilter: endpoint.DomainFilter{},
+			domainFilter: &endpoint.DomainFilter{},
 		},
 	}
 	if err := cfg.ParseFlags(os.Args[1:]); err != nil {

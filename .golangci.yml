@@ -1,0 +1,96 @@
+version: "2"
+run:
+  modules-download-mode: readonly
+  tests: true
+linters:
+  default: none
+  enable:
+    - copyloopvar
+    - dogsled
+    - dupl
+    - errcheck
+    - errname
+    - exhaustive
+    - forcetypeassert
+    - funlen
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godox
+    - goprintffuncname
+    - gosec
+    - govet
+    - importas
+    - ineffassign
+    - lll
+    - misspell
+    - mnd
+    - nakedret
+    - nestif
+    - nilnil
+    - nolintlint
+    - prealloc
+    - predeclared
+    - promlinter
+    - testpackage
+    - thelper
+    - unconvert
+    - unused
+    - whitespace
+  settings:
+    dupl:
+      threshold: 100
+    funlen:
+      lines: 100
+      statements: 50
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+        - octalLiteral
+        - wrapperFunc
+      enabled-tags:
+        - diagnostic
+        - opinionated
+        - performance
+      settings:
+        hugeParam:
+          sizeThreshold: 200
+    gocyclo:
+      min-complexity: 15
+    lll:
+      line-length: 130
+    misspell:
+      locale: US
+    nolintlint:
+      require-explanation: false
+      require-specific: false
+      allow-unused: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/GDATASoftwareAG/external-dns-coredns-webhook
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
