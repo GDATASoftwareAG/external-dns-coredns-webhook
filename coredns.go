@@ -50,7 +50,7 @@ const (
 
 type CoreDNSConfig struct {
 	coreDNSPrefix                 string
-	domainFilter                  endpoint.DomainFilter
+	domainFilter                  *endpoint.DomainFilter
 	ownerID                       string
 	preFilterExternalOwnedRecords bool
 }
@@ -323,8 +323,8 @@ func (p coreDNSProvider) groupEndpoints(changes *plan.Changes) map[string][]*end
 		grouped[ep.DNSName] = append(grouped[ep.DNSName], ep)
 	}
 	for i, ep := range changes.UpdateNew {
+		log.Debugf("Updating labels (%s) with old labels (%s)", ep.Labels, changes.UpdateOld[i].Labels)
 		ep.Labels = changes.UpdateOld[i].Labels
-		log.Debugf("Updating labels (%s) with old labels(%s)", ep.Labels, changes.UpdateOld[i].Labels)
 		grouped[ep.DNSName] = append(grouped[ep.DNSName], ep)
 	}
 	return grouped

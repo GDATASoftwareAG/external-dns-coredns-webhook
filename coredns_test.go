@@ -522,9 +522,7 @@ func TestCoreDNSApplyChanges_DomainDoNotMatch(t *testing.T) {
 		client: client,
 		CoreDNSConfig: CoreDNSConfig{
 			coreDNSPrefix: defaultCoreDNSPrefix,
-			domainFilter: endpoint.DomainFilter{
-				Filters: []string{"example.local"},
-			},
+			domainFilter:  endpoint.NewDomainFilter([]string{"example.local"}),
 		},
 	}
 
@@ -636,7 +634,8 @@ func TestGetServices_Duplicate(t *testing.T) {
 	}
 
 	svc := Service{Host: "example.com", Port: 80, Priority: 1, Weight: 10, Text: "hello"}
-	value, _ := json.Marshal(svc)
+	value, err := json.Marshal(svc)
+	require.NoError(t, err)
 
 	mockKV.On("Get", mock.Anything, "/prefix").Return(&etcdcv3.GetResponse{
 		Kvs: []*mvccpb.KeyValue{
@@ -863,7 +862,7 @@ func TestNewCoreDNSProvider(t *testing.T) {
 			testutils.TestHelperEnvSetter(t, tt.envs)
 
 			provider, err := NewCoreDNSProvider(CoreDNSConfig{
-				domainFilter:  endpoint.DomainFilter{},
+				domainFilter:  &endpoint.DomainFilter{},
 				coreDNSPrefix: "/prefix/",
 			}, false)
 			if tt.wantErr {

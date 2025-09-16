@@ -88,7 +88,7 @@ func main() {
 	// instantiate the config
 	cfg := Config{
 		CoreDNSConfig: CoreDNSConfig{
-			domainFilter: endpoint.DomainFilter{},
+			domainFilter: &endpoint.DomainFilter{},
 		},
 	}
 	if err := cfg.ParseFlags(os.Args[1:]); err != nil {
