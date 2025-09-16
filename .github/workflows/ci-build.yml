@@ -19,3 +19,4 @@ jobs:
         with:
           version: v2.4
       - run: go build ./...
+      - run: go test
