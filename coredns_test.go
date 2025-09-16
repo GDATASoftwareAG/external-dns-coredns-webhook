@@ -17,12 +17,13 @@ package main
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
-	etcdcv3 "go.etcd.io/etcd/client/v3"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	etcdcv3 "go.etcd.io/etcd/client/v3"
 
 	"sigs.k8s.io/external-dns/endpoint"
 	"sigs.k8s.io/external-dns/plan"
@@ -57,7 +58,7 @@ func (c fakeETCDClient) DeleteService(key string) error {
 }
 
 func TestETCDConfig(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		name  string
 		input map[string]string
 		want  *etcdcv3.Config
@@ -148,6 +149,7 @@ func TestAServiceTranslation(t *testing.T) {
 		t.Errorf("got unexpected DNS record type: %s != %s", endpoints[0].RecordType, expectedRecordType)
 	}
 }
+
 func TestAServiceFilterOutOtherOwnerBasedOnText(t *testing.T) {
 	expectedTarget := "1.2.3.4"
 
