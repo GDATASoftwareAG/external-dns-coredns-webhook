@@ -40,6 +40,8 @@ type Config struct {
 	webhookProviderReadTimeout  time.Duration
 	webhookProviderWriteTimeout time.Duration
 	webhookProviderPort         string
+	managedBy                   string
+	ignoreEmptyManagedBy        bool
 }
 
 // allLogLevelsAsStrings returns all logrus levels as a list of strings
@@ -71,10 +73,10 @@ func (cfg *Config) ParseFlags(args []string) error {
 
 	app.Flag("prefix", "Specify the prefix name").
 		Default("/skydns/").StringVar(&cfg.coreDNSPrefix)
-	app.Flag("txt-owner-id", "When using the TXT registry, a name that identifies this instance of ExternalDNS (default: default)").
-		Default("default").StringVar(&cfg.ownerID)
-	app.Flag("pre-filter-external-owned-records", "Services are pre filter based on the txt-owner-id (default: false)").
-		BoolVar(&cfg.preFilterExternalOwnedRecords)
+	app.Flag("managed-by", "Only allow checking of services created by the same manager (default: \"\")").
+		Default("").StringVar(&cfg.managedBy)
+	app.Flag("ignore-empty-managed-by", "If the 'managed-by' field is set, this prevents the takeover of services without a 'managed-by' value (default: disabled)").
+		BoolVar(&cfg.ignoreEmptyManagedBy)
 
 	_, err := app.Parse(args)
 	if err != nil {
@@ -110,7 +112,7 @@ func main() {
 	log.SetLevel(ll)
 
 	// instantiate the dns provider
-	dnsProvider, err := NewCoreDNSProvider(cfg.CoreDNSConfig, cfg.dryRun)
+	dnsProvider, err := NewCoreDNSProvider(cfg.CoreDNSConfig, cfg.managedBy, cfg.ignoreEmptyManagedBy, cfg.dryRun)
 	if err != nil {
 		log.Fatalf("listen failed error: %v", err)
 	}

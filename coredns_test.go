@@ -186,52 +186,6 @@ func TestAServiceTranslation(t *testing.T) {
 	}
 }
 
-func TestAServiceFilterOutOtherOwnerBasedOnText(t *testing.T) {
-	expectedTarget := "1.2.3.4"
-
-	client := fakeETCDClient{
-		map[string]Service{
-			"/skydns/com/example": {Host: expectedTarget, Text: "\"heritage=external-dns,external-dns/owner=owner,external-dns/resource=ingress/default/my-ingress\""},
-		},
-	}
-	provider := coreDNSProvider{
-		client: client,
-		CoreDNSConfig: CoreDNSConfig{
-			coreDNSPrefix:                 defaultCoreDNSPrefix,
-			ownerID:                       "not-owner",
-			preFilterExternalOwnedRecords: true,
-		},
-	}
-	endpoints, err := provider.Records(context.Background())
-	require.NoError(t, err)
-	if len(endpoints) != 0 {
-		t.Fatalf("got unexpected number of endpoints: %d", len(endpoints))
-	}
-}
-
-func TestAServiceOwnOwnerBasedOnText(t *testing.T) {
-	expectedTarget := "1.2.3.4"
-
-	client := fakeETCDClient{
-		map[string]Service{
-			"/skydns/com/example": {Host: expectedTarget, Text: "\"heritage=external-dns,external-dns/owner=owner,external-dns/resource=ingress/default/my-ingress\""},
-		},
-	}
-	provider := coreDNSProvider{
-		client: client,
-		CoreDNSConfig: CoreDNSConfig{
-			coreDNSPrefix:                 defaultCoreDNSPrefix,
-			ownerID:                       "owner",
-			preFilterExternalOwnedRecords: true,
-		},
-	}
-	endpoints, err := provider.Records(context.Background())
-	require.NoError(t, err)
-	if len(endpoints) != 2 {
-		t.Fatalf("got unexpected number of endpoints: %d", len(endpoints))
-	}
-}
-
 func TestCNAMEServiceTranslation(t *testing.T) {
 	expectedTarget := "example.net"
 	expectedDNSName := "example.com"
@@ -690,6 +644,95 @@ func TestGetServices_Multiple(t *testing.T) {
 	assert.Equal(t, priority, result[1].Priority)
 }
 
+func TestGetServices_FilterOutOtherServicesWithDifferentManager(t *testing.T) {
+	mockKV := new(MockEtcdKV)
+	c := etcdClient{
+		client: &etcdcv3.Client{
+			KV: mockKV,
+		},
+		ctx:                  context.TODO(),
+		managedBy:            "managed-by",
+		ignoreEmptyManagedBy: false,
+	}
+
+	svc := Service{Host: "example.com", Port: 80, Priority: 1, Weight: 10, Text: "hello", ManagedBy: "managed-by"}
+	value, err := json.Marshal(svc)
+	require.NoError(t, err)
+	svc2 := Service{Host: "example.com", Port: 80, Priority: 0, Weight: 10, Text: "hello", ManagedBy: ""}
+	value2, err := json.Marshal(svc2)
+	require.NoError(t, err)
+	svc3 := Service{Host: "example.com", Port: 80, Priority: 0, Weight: 10, Text: "hello", ManagedBy: "managed-by-someone-else"}
+	value3, err := json.Marshal(svc3)
+	require.NoError(t, err)
+
+	mockKV.On("Get", mock.Anything, "/prefix").Return(&etcdcv3.GetResponse{
+		Kvs: []*mvccpb.KeyValue{
+			{
+				Key:   []byte("/prefix/1"),
+				Value: value,
+			},
+			{
+				Key:   []byte("/prefix/2"),
+				Value: value2,
+			},
+			{
+				Key:   []byte("/prefix/3"),
+				Value: value3,
+			},
+		},
+	}, nil)
+
+	result, err := c.GetServices("/prefix")
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+	assert.Equal(t, "managed-by", result[0].ManagedBy)
+	assert.Equal(t, "", result[1].ManagedBy)
+}
+
+func TestGetServices_FilterOutOtherServicesWithDifferentManagerAndIgnoreEmpty(t *testing.T) {
+	mockKV := new(MockEtcdKV)
+	c := etcdClient{
+		client: &etcdcv3.Client{
+			KV: mockKV,
+		},
+		ctx:                  context.TODO(),
+		managedBy:            "managed-by",
+		ignoreEmptyManagedBy: true,
+	}
+
+	svc := Service{Host: "example.com", Port: 80, Priority: 1, Weight: 10, Text: "hello", ManagedBy: "managed-by"}
+	value, err := json.Marshal(svc)
+	require.NoError(t, err)
+	svc2 := Service{Host: "example.com", Port: 80, Priority: 0, Weight: 10, Text: "hello", ManagedBy: ""}
+	value2, err := json.Marshal(svc2)
+	require.NoError(t, err)
+	svc3 := Service{Host: "example.com", Port: 80, Priority: 0, Weight: 10, Text: "hello", ManagedBy: "managed-by-someone-else"}
+	value3, err := json.Marshal(svc3)
+	require.NoError(t, err)
+
+	mockKV.On("Get", mock.Anything, "/prefix").Return(&etcdcv3.GetResponse{
+		Kvs: []*mvccpb.KeyValue{
+			{
+				Key:   []byte("/prefix/1"),
+				Value: value,
+			},
+			{
+				Key:   []byte("/prefix/2"),
+				Value: value2,
+			},
+			{
+				Key:   []byte("/prefix/3"),
+				Value: value3,
+			},
+		},
+	}, nil)
+
+	result, err := c.GetServices("/prefix")
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Equal(t, "managed-by", result[0].ManagedBy)
+}
+
 func TestGetServices_UnmarshalError(t *testing.T) {
 	mockKV := new(MockEtcdKV)
 	c := etcdClient{
@@ -735,14 +778,74 @@ func TestGetServices_GetError(t *testing.T) {
 
 func TestDeleteService(t *testing.T) {
 	tests := []struct {
-		name    string
-		key     string
-		mockErr error
-		wantErr bool
+		name              string
+		managedBy         string
+		key               string
+		service           *Service
+		exists            bool
+		mockErr           error
+		wantErr           bool
+		preventDeleteCall bool
 	}{
 		{
-			name: "successful deletion",
-			key:  "/skydns/local/test",
+			name:   "successful deletion",
+			key:    "/skydns/local/test",
+			exists: true,
+			service: &Service{
+				Host:     "example.com",
+				Port:     80,
+				Priority: 1,
+				Weight:   10,
+				Text:     "hello",
+				Key:      "/skydns/local/test",
+			},
+		},
+		{
+			name:      "successful deletion with managed by (no one)",
+			key:       "/skydns/local/test",
+			managedBy: "managed-by",
+			exists:    true,
+			service: &Service{
+				Host:     "example.com",
+				Port:     80,
+				Priority: 1,
+				Weight:   10,
+				Text:     "hello",
+				Key:      "/skydns/local/test",
+			},
+		},
+		{
+			name:      "successful deletion with managed by (same)",
+			key:       "/skydns/local/test",
+			managedBy: "managed-by",
+			exists:    true,
+			service: &Service{
+				Host:      "example.com",
+				Port:      80,
+				Priority:  1,
+				Weight:    10,
+				Text:      "hello",
+				Key:       "/skydns/local/test",
+				ManagedBy: "managed-by",
+			},
+		},
+		{
+			name:              "prevent deletion with managed by (other)",
+			key:               "/skydns/local/test",
+			managedBy:         "managed-by",
+			exists:            true,
+			wantErr:           true,
+			preventDeleteCall: true,
+			mockErr:           errors.New("key \"/skydns/local/test\" is not owned by this service"),
+			service: &Service{
+				Host:      "example.com",
+				Port:      80,
+				Priority:  1,
+				Weight:    10,
+				Text:      "hello",
+				Key:       "/skydns/local/test",
+				ManagedBy: "managed-by-other",
+			},
 		},
 		{
 			name:    "etcd error",
@@ -755,17 +858,38 @@ func TestDeleteService(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockKV := new(MockEtcdKV)
-			mockKV.On("Delete", mock.Anything, mock.Anything, mock.AnythingOfType("clientv3.OpOption")).
-				Return(&etcdcv3.DeleteResponse{}, tt.mockErr)
+			if !tt.preventDeleteCall {
+				mockKV.On("Delete", mock.Anything, mock.Anything, mock.AnythingOfType("clientv3.OpOption")).
+					Return(&etcdcv3.DeleteResponse{}, tt.mockErr)
+			}
+			actualValue, err := json.Marshal(&tt.service)
+			require.NoError(t, err)
+			if tt.managedBy != "" {
+				if tt.exists {
+					mockKV.On("Get", mock.Anything, tt.service.Key).Return(&etcdcv3.GetResponse{
+						Kvs: []*mvccpb.KeyValue{
+							{
+								Key:   []byte(tt.service.Key),
+								Value: actualValue,
+							},
+						},
+					}, nil)
+				} else {
+					mockKV.On("Get", mock.Anything, tt.service.Key).Return(&etcdcv3.GetResponse{
+						Kvs: []*mvccpb.KeyValue{},
+					}, nil)
+				}
+			}
 
 			c := etcdClient{
 				client: &etcdcv3.Client{
 					KV: mockKV,
 				},
-				ctx: context.Background(),
+				ctx:       context.Background(),
+				managedBy: tt.managedBy,
 			}
 
-			err := c.DeleteService(tt.key)
+			err = c.DeleteService(tt.key)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -780,10 +904,13 @@ func TestDeleteService(t *testing.T) {
 
 func TestSaveService(t *testing.T) {
 	type testCase struct {
-		name       string
-		service    *Service
-		mockPutErr error
-		wantErr    bool
+		name            string
+		managedBy       string
+		service         *Service
+		expectedService *Service
+		exists          bool
+		mockPutErr      error
+		wantErr         bool
 	}
 	tests := []testCase{
 		{
@@ -796,10 +923,104 @@ func TestSaveService(t *testing.T) {
 				Text:     "hello",
 				Key:      "/prefix/1",
 			},
+			expectedService: &Service{
+				Host:     "example.com",
+				Port:     80,
+				Priority: 1,
+				Weight:   10,
+				Text:     "hello",
+				Key:      "/prefix/1",
+			},
+		},
+		{
+			name:      "success with managed by (take over ownership)",
+			managedBy: "managed-by",
+			exists:    true,
+			service: &Service{
+				Host:     "example.com",
+				Port:     80,
+				Priority: 1,
+				Weight:   10,
+				Text:     "hello",
+				Key:      "/prefix/1",
+			},
+			expectedService: &Service{
+				Host:      "example.com",
+				Port:      80,
+				Priority:  1,
+				Weight:    10,
+				Text:      "hello",
+				Key:       "/prefix/1",
+				ManagedBy: "managed-by",
+			},
+		},
+		{
+			name:      "success with managed by (creation)",
+			managedBy: "managed-by",
+			exists:    false,
+			service: &Service{
+				Host:     "example.com",
+				Port:     80,
+				Priority: 1,
+				Weight:   10,
+				Text:     "hello",
+				Key:      "/prefix/1",
+			},
+			expectedService: &Service{
+				Host:      "example.com",
+				Port:      80,
+				Priority:  1,
+				Weight:    10,
+				Text:      "hello",
+				Key:       "/prefix/1",
+				ManagedBy: "managed-by",
+			},
+		},
+		{
+			name:      "success with managed by (update)",
+			managedBy: "managed-by",
+			exists:    false,
+			service: &Service{
+				Host:      "example.com",
+				Port:      80,
+				Priority:  1,
+				Weight:    10,
+				Text:      "hello",
+				Key:       "/prefix/1",
+				ManagedBy: "managed-by",
+			},
+			expectedService: &Service{
+				Host:      "example.com",
+				Port:      80,
+				Priority:  1,
+				Weight:    10,
+				Text:      "hello",
+				Key:       "/prefix/1",
+				ManagedBy: "managed-by",
+			},
+		},
+		{
+			name:      "fail saving due to managed by someone else",
+			managedBy: "managed-by",
+			exists:    true,
+			service: &Service{
+				Host:      "example.com",
+				Port:      80,
+				Priority:  1,
+				Weight:    10,
+				Text:      "hello",
+				Key:       "/prefix/1",
+				ManagedBy: "other-managed-by",
+			},
+			wantErr: true,
 		},
 		{
 			name: "etcd put error",
 			service: &Service{
+				Host: "example.com",
+				Key:  "/prefix/2",
+			},
+			expectedService: &Service{
 				Host: "example.com",
 				Key:  "/prefix/2",
 			},
@@ -811,16 +1032,37 @@ func TestSaveService(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockKV := new(MockEtcdKV)
-			value, err := json.Marshal(&tt.service)
+			value, err := json.Marshal(&tt.expectedService)
 			require.NoError(t, err)
-			mockKV.On("Put", mock.Anything, tt.service.Key, string(value)).
-				Return(&etcdcv3.PutResponse{}, tt.mockPutErr)
+			if tt.expectedService != nil {
+				mockKV.On("Put", mock.Anything, tt.service.Key, string(value)).
+					Return(&etcdcv3.PutResponse{}, tt.mockPutErr)
+			}
+			actualValue, err := json.Marshal(&tt.service)
+			require.NoError(t, err)
+			if tt.managedBy != "" {
+				if tt.exists {
+					mockKV.On("Get", mock.Anything, tt.service.Key).Return(&etcdcv3.GetResponse{
+						Kvs: []*mvccpb.KeyValue{
+							{
+								Key:   []byte(tt.service.Key),
+								Value: actualValue,
+							},
+						},
+					}, nil)
+				} else {
+					mockKV.On("Get", mock.Anything, tt.service.Key).Return(&etcdcv3.GetResponse{
+						Kvs: []*mvccpb.KeyValue{},
+					}, nil)
+				}
+			}
 
 			c := etcdClient{
 				client: &etcdcv3.Client{
 					KV: mockKV,
 				},
-				ctx: context.TODO(),
+				ctx:       context.TODO(),
+				managedBy: tt.managedBy,
 			}
 
 			err = c.SaveService(tt.service)
@@ -864,7 +1106,7 @@ func TestNewCoreDNSProvider(t *testing.T) {
 			provider, err := NewCoreDNSProvider(CoreDNSConfig{
 				domainFilter:  &endpoint.DomainFilter{},
 				coreDNSPrefix: "/prefix/",
-			}, false)
+			}, "", false, false)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.EqualError(t, err, tt.errMsg)
