@@ -49,10 +49,8 @@ const (
 )
 
 type CoreDNSConfig struct {
-	coreDNSPrefix                 string
-	domainFilter                  *endpoint.DomainFilter
-	ownerID                       string
-	preFilterExternalOwnedRecords bool
+	coreDNSPrefix string
+	domainFilter  *endpoint.DomainFilter
 }
 
 // coreDNSClient is an interface to work with CoreDNS service records in etcd
@@ -93,11 +91,16 @@ type Service struct {
 
 	// Etcd key where we found this service and ignored from json un-/marshaling
 	Key string `json:"-"`
+
+	// ManagedBy is used to prevent service to be added by different external-dns (only used by external-dns)
+	ManagedBy string `json:"managedby,omitempty"`
 }
 
 type etcdClient struct {
-	client *etcdcv3.Client
-	ctx    context.Context
+	client               *etcdcv3.Client
+	ctx                  context.Context
+	managedBy            string
+	ignoreEmptyManagedBy bool
 }
 
 var _ coreDNSClient = etcdClient{}
@@ -120,11 +123,26 @@ func (c etcdClient) GetServices(prefix string) ([]*Service, error) {
 		if err := json.Unmarshal(n.Value, svc); err != nil {
 			return nil, fmt.Errorf("%s: %w", n.Key, err)
 		}
-		b := Service{Host: svc.Host, Port: svc.Port, Priority: svc.Priority, Weight: svc.Weight, Text: svc.Text, Key: string(n.Key)}
+		b := Service{
+			Host:      svc.Host,
+			Port:      svc.Port,
+			Priority:  svc.Priority,
+			Weight:    svc.Weight,
+			Text:      svc.Text,
+			Key:       string(n.Key),
+			ManagedBy: svc.ManagedBy,
+		}
 		if _, ok := bx[b]; ok {
 			// skip the service if already added to service list.
 			// the same service might be found in multiple etcd nodes.
 			continue
+		}
+		if c.managedBy != "" {
+			if c.ignoreEmptyManagedBy && b.ManagedBy != c.managedBy {
+				continue
+			} else if !c.ignoreEmptyManagedBy && b.ManagedBy != "" && b.ManagedBy != c.managedBy {
+				continue
+			}
 		}
 		bx[b] = true
 
@@ -143,6 +161,15 @@ func (c etcdClient) SaveService(service *Service) error {
 	ctx, cancel := context.WithTimeout(c.ctx, etcdTimeout)
 	defer cancel()
 
+	if c.managedBy != "" {
+		service.ManagedBy = c.managedBy
+	}
+	if ownedBy, err := c.IsOwnedBy(service.Key); err != nil {
+		return err
+	} else if !ownedBy {
+		return fmt.Errorf("key %q is not owned by this service", service.Key)
+	}
+
 	value, err := json.Marshal(&service)
 	if err != nil {
 		return err
@@ -154,10 +181,51 @@ func (c etcdClient) SaveService(service *Service) error {
 	return nil
 }
 
+func (c etcdClient) IsOwnedBy(key string) (bool, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, etcdTimeout)
+	defer cancel()
+
+	if c.managedBy == "" {
+		return true, nil
+	}
+
+	r, err := c.client.Get(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	if r == nil {
+		return true, nil
+	} else if len(r.Kvs) > 1 {
+		return false, fmt.Errorf("found multiple keys with the same key this service")
+	} else if len(r.Kvs) == 0 {
+		return true, nil
+	}
+	for _, n := range r.Kvs {
+		svc := new(Service)
+		if err := json.Unmarshal(n.Value, svc); err != nil {
+			return false, fmt.Errorf("%s: %w", n.Key, err)
+		}
+
+		if !c.ignoreEmptyManagedBy && svc.ManagedBy == "" {
+			return true, nil
+		}
+		if svc.ManagedBy == c.managedBy {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // DeleteService deletes service record from etcd
 func (c etcdClient) DeleteService(key string) error {
 	ctx, cancel := context.WithTimeout(c.ctx, etcdTimeout)
 	defer cancel()
+
+	if owned, err := c.IsOwnedBy(key); err != nil {
+		return err
+	} else if !owned {
+		return fmt.Errorf("key %q is not owned by this service", key)
+	}
 
 	_, err := c.client.Delete(ctx, key, etcdcv3.WithPrefix())
 	return err
@@ -193,7 +261,7 @@ func getETCDConfig() (*etcdcv3.Config, error) {
 }
 
 // the newETCDClient is an etcd client constructor
-func newETCDClient() (coreDNSClient, error) {
+func newETCDClient(managedBy string, ignoreEmptyManagedBy bool) (coreDNSClient, error) {
 	cfg, err := getETCDConfig()
 	if err != nil {
 		return nil, err
@@ -202,12 +270,12 @@ func newETCDClient() (coreDNSClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return etcdClient{c, context.Background()}, nil
+	return etcdClient{c, context.Background(), managedBy, ignoreEmptyManagedBy}, nil
 }
 
 // NewCoreDNSProvider is a CoreDNS provider constructor
-func NewCoreDNSProvider(config CoreDNSConfig, dryRun bool) (provider.Provider, error) {
-	client, err := newETCDClient()
+func NewCoreDNSProvider(config CoreDNSConfig, managedBy string, ignoreEmptyManagedBy, dryRun bool) (provider.Provider, error) {
+	client, err := newETCDClient(managedBy, ignoreEmptyManagedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -250,14 +318,6 @@ func (p coreDNSProvider) Records(_ context.Context) ([]*endpoint.Endpoint, error
 		return nil, err
 	}
 	for _, service := range services {
-		if p.preFilterExternalOwnedRecords && service.Text != "" {
-			if labels, err := endpoint.NewLabelsFromStringPlain(service.Text); err == nil && labels != nil {
-				if owner, exists := labels[endpoint.OwnerLabelKey]; exists && owner != p.ownerID {
-					log.Debugf(`Skipping coredns service %v because owner id does not match, found: "%s", required: "%s"`, service, owner, p.ownerID)
-					continue
-				}
-			}
-		}
 		domains := strings.Split(strings.TrimPrefix(service.Key, p.coreDNSPrefix), "/")
 		reverse(domains)
 		dnsName := strings.Join(domains[service.TargetStrip:], ".")
