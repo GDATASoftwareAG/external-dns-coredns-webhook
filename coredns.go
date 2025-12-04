@@ -94,6 +94,9 @@ type Service struct {
 
 	// ManagedBy is used to prevent service to be added by different external-dns (only used by external-dns)
 	ManagedBy string `json:"managedby,omitempty"`
+
+	// OwnedBy is used to prevent service to be added by different external-dns (only used by external-dns)
+	OwnedBy string `json:"ownedby,omitempty"`
 }
 
 type etcdClient struct {
@@ -130,6 +133,7 @@ func (c etcdClient) GetServices(ctx context.Context, prefix string) ([]*Service,
 			Text:      svc.Text,
 			Key:       string(n.Key),
 			ManagedBy: svc.ManagedBy,
+			OwnedBy:   svc.OwnedBy,
 		}
 		if _, ok := bx[b]; ok {
 			// skip the service if already added to service list.
@@ -162,6 +166,7 @@ func (c etcdClient) SaveService(ctx context.Context, service *Service) error {
 
 	if c.managedBy != "" {
 		service.ManagedBy = c.managedBy
+		service.OwnedBy = c.managedBy
 	}
 	if ownedBy, err := c.IsOwnedBy(ctx, service.Key); err != nil {
 		return err

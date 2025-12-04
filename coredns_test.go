@@ -944,6 +944,7 @@ func TestSaveService(t *testing.T) {
 				Text:      "hello",
 				Key:       "/prefix/1",
 				ManagedBy: "managed-by",
+				OwnedBy:   "managed-by",
 			},
 		},
 		{
@@ -966,6 +967,7 @@ func TestSaveService(t *testing.T) {
 				Text:      "hello",
 				Key:       "/prefix/1",
 				ManagedBy: "managed-by",
+				OwnedBy:   "managed-by",
 			},
 		},
 		{
@@ -989,6 +991,7 @@ func TestSaveService(t *testing.T) {
 				Text:      "hello",
 				Key:       "/prefix/1",
 				ManagedBy: "managed-by",
+				OwnedBy:   "managed-by",
 			},
 		},
 		{
