@@ -1,5 +1,9 @@
 # ExternalDNS Plugin CoreDNS Webhook
 
+## Deprecated
+
+With the release of version 0.21 or newer, every function is now included inside the in-tree provider.
+
 ## Commandline
 
 ```

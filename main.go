@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
@@ -29,6 +30,10 @@ import (
 	"sigs.k8s.io/external-dns/endpoint"
 )
 
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
 // Version is the current version of the app, generated at build time
 var Version = "unknown"
 
@@ -40,8 +45,8 @@ type Config struct {
 	webhookProviderReadTimeout  time.Duration
 	webhookProviderWriteTimeout time.Duration
 	webhookProviderPort         string
-	managedBy                   string
-	ignoreEmptyManagedBy        bool
+	ownerID                     string
+	strictlyOwned               bool
 }
 
 // allLogLevelsAsStrings returns all logrus levels as a list of strings
@@ -74,9 +79,9 @@ func (cfg *Config) ParseFlags(args []string) error {
 	app.Flag("prefix", "Specify the prefix name").
 		Default("/skydns/").StringVar(&cfg.coreDNSPrefix)
 	app.Flag("managed-by", "Only allow checking of services created by the same manager (default: \"\")").
-		Default("").StringVar(&cfg.managedBy)
-	app.Flag("ignore-empty-managed-by", "If the 'managed-by' field is set, this prevents the takeover of services without a 'managed-by' value (default: disabled)").
-		BoolVar(&cfg.ignoreEmptyManagedBy)
+		Default("").StringVar(&cfg.ownerID)
+	app.Flag("strictly-owned", "When using the CoreDNS provider, store and filter strictly by txt-owner-id using an extra field inside of the etcd service (default: false)").
+		BoolVar(&cfg.strictlyOwned)
 
 	_, err := app.Parse(args)
 	if err != nil {
@@ -112,7 +117,7 @@ func main() {
 	log.SetLevel(ll)
 
 	// instantiate the dns provider
-	dnsProvider, err := NewCoreDNSProvider(cfg.CoreDNSConfig, cfg.managedBy, cfg.ignoreEmptyManagedBy, cfg.dryRun)
+	dnsProvider, err := NewCoreDNSProvider(cfg.CoreDNSConfig, cfg.ownerID, cfg.strictlyOwned, cfg.dryRun)
 	if err != nil {
 		log.Fatalf("listen failed error: %v", err)
 	}
