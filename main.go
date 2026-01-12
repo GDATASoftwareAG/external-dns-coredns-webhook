@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,6 +29,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"sigs.k8s.io/external-dns/endpoint"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 // Version is the current version of the app, generated at build time
 var Version = "unknown"

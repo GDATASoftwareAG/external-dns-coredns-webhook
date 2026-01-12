@@ -30,6 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	etcdcv3 "go.etcd.io/etcd/client/v3"
+
 	"sigs.k8s.io/external-dns/pkg/tlsutils"
 
 	"sigs.k8s.io/external-dns/endpoint"
@@ -37,16 +38,13 @@ import (
 	"sigs.k8s.io/external-dns/provider"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
 const (
 	priority    = 10 // default priority when nothing is set
 	etcdTimeout = 5 * time.Second
 
-	randomPrefixLabel     = "prefix"
-	providerSpecificGroup = "webhook/coredns-group"
+	randomPrefixLabel      = "prefix"
+	providerSpecificGroup  = "webhook/coredns-group"
+	providerSpecificGroup2 = "coredns/group"
 )
 
 type CoreDNSConfig struct {
@@ -66,6 +64,7 @@ type coreDNSProvider struct {
 	client coreDNSClient
 	dryRun bool
 	CoreDNSConfig
+	strictlyOwned bool
 }
 
 // Service represents CoreDNS etcd record
@@ -93,13 +92,13 @@ type Service struct {
 	// Etcd key where we found this service and ignored from json un-/marshaling
 	Key string `json:"-"`
 
-	// OwnedBy is used to prevent service to be added by different external-dns (only used by external-dns)
-	OwnedBy string `json:"ownedby,omitempty"`
+	// Owner is used to prevent service to be added by different external-dns (only used by external-dns)
+	Owner string `json:"owner,omitempty"`
 }
 
 type etcdClient struct {
 	client        *etcdcv3.Client
-	ownerID       string
+	owner         string
 	strictlyOwned bool
 }
 
@@ -123,7 +122,7 @@ func (c etcdClient) GetServices(ctx context.Context, prefix string) ([]*Service,
 		if err != nil {
 			return nil, err
 		}
-		if c.strictlyOwned && svc.OwnedBy != c.ownerID {
+		if c.strictlyOwned && svc.Owner != c.owner {
 			continue
 		}
 		b := Service{
@@ -156,7 +155,7 @@ func (c etcdClient) SaveService(ctx context.Context, service *Service) error {
 	defer cancel()
 
 	// check only for empty OwnedBy
-	if c.strictlyOwned && service.OwnedBy != c.ownerID {
+	if c.strictlyOwned && service.Owner != c.owner {
 		r, err := c.client.Get(ctx, service.Key)
 		if err != nil {
 			return fmt.Errorf("etcd get %q: %w", service.Key, err)
@@ -167,11 +166,11 @@ func (c etcdClient) SaveService(ctx context.Context, service *Service) error {
 			if err != nil {
 				return fmt.Errorf("failed to unmarshal value for key %q: %w", service.Key, err)
 			}
-			if svc.OwnedBy != c.ownerID {
+			if svc.Owner != c.owner {
 				return fmt.Errorf("key %q is not owned by this provider", service.Key)
 			}
 		}
-		service.OwnedBy = c.ownerID
+		service.Owner = c.owner
 	}
 
 	value, err := json.Marshal(&service)
@@ -200,7 +199,7 @@ func (c etcdClient) DeleteService(ctx context.Context, key string) error {
 			if err != nil {
 				return err
 			}
-			if svc.OwnedBy != c.ownerID {
+			if svc.Owner != c.owner {
 				continue
 			}
 
@@ -234,9 +233,10 @@ func getETCDConfig() (*etcdcv3.Config, error) {
 	firstURL := strings.ToLower(etcdURLs[0])
 	etcdUsername := os.Getenv("ETCD_USERNAME")
 	etcdPassword := os.Getenv("ETCD_PASSWORD")
-	if strings.HasPrefix(firstURL, "http://") {
+	switch {
+	case strings.HasPrefix(firstURL, "http://"):
 		return &etcdcv3.Config{Endpoints: etcdURLs, Username: etcdUsername, Password: etcdPassword}, nil
-	} else if strings.HasPrefix(firstURL, "https://") {
+	case strings.HasPrefix(firstURL, "https://"):
 		tlsConfig, err := tlsutils.CreateTLSConfig("ETCD")
 		if err != nil {
 			return nil, err
@@ -248,13 +248,13 @@ func getETCDConfig() (*etcdcv3.Config, error) {
 			Username:  etcdUsername,
 			Password:  etcdPassword,
 		}, nil
-	} else {
+	default:
 		return nil, errors.New("etcd URLs must start with either http:// or https://")
 	}
 }
 
 // the newETCDClient is an etcd client constructor
-func newETCDClient(ownerID string, strictlyOwned bool) (coreDNSClient, error) {
+func newETCDClient(owner string, strictlyOwned bool) (coreDNSClient, error) {
 	cfg, err := getETCDConfig()
 	if err != nil {
 		return nil, err
@@ -263,12 +263,12 @@ func newETCDClient(ownerID string, strictlyOwned bool) (coreDNSClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return etcdClient{c, ownerID, strictlyOwned}, nil
+	return etcdClient{c, owner, strictlyOwned}, nil
 }
 
 // NewCoreDNSProvider is a CoreDNS provider constructor
-func NewCoreDNSProvider(config CoreDNSConfig, ownerID string, strictlyOwned, dryRun bool) (provider.Provider, error) {
-	client, err := newETCDClient(ownerID, strictlyOwned)
+func NewCoreDNSProvider(config CoreDNSConfig, owner string, strictlyOwned, dryRun bool) (provider.Provider, error) {
+	client, err := newETCDClient(owner, strictlyOwned)
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +277,7 @@ func NewCoreDNSProvider(config CoreDNSConfig, ownerID string, strictlyOwned, dry
 		client:        client,
 		dryRun:        dryRun,
 		CoreDNSConfig: config,
+		strictlyOwned: strictlyOwned,
 	}, nil
 }
 
@@ -333,8 +334,12 @@ func (p coreDNSProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, err
 				)
 				if service.Group != "" {
 					ep.WithProviderSpecific(providerSpecificGroup, service.Group)
+					ep.WithProviderSpecific(providerSpecificGroup2, service.Group)
 				}
 				log.Debugf("Creating new ep (%s) with new service host (%s)", ep, service.Host)
+			}
+			if p.strictlyOwned {
+				ep.Labels[endpoint.OwnerLabelKey] = service.Owner
 			}
 			ep.Labels["originalText"] = service.Text
 			ep.Labels[randomPrefixLabel] = prefix
@@ -347,6 +352,9 @@ func (p coreDNSProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, err
 				endpoint.RecordTypeTXT,
 				service.Text,
 			)
+			if p.strictlyOwned {
+				ep.Labels[endpoint.OwnerLabelKey] = service.Owner
+			}
 			ep.Labels[randomPrefixLabel] = prefix
 			result = append(result, ep)
 		}
@@ -420,9 +428,11 @@ func (p coreDNSProvider) createServicesForEndpoint(ctx context.Context, dnsName 
 			prefix = fmt.Sprintf("%08x", rand.Int31())
 			log.Infof("Generating new prefix: (%s)", prefix)
 		}
-
 		group := ""
 		if prop, ok := ep.GetProviderSpecificProperty(providerSpecificGroup); ok {
+			group = prop
+		}
+		if prop, ok := ep.GetProviderSpecificProperty(providerSpecificGroup2); ok {
 			group = prop
 		}
 		service := Service{
