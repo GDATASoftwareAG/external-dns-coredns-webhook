@@ -6,7 +6,7 @@ toolchain go1.24.5
 
 require (
 	github.com/alecthomas/kingpin v2.2.6+incompatible
-	github.com/sirupsen/logrus v1.9.3
+	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/etcd/api/v3 v3.6.5
 	go.etcd.io/etcd/client/v3 v3.6.5
