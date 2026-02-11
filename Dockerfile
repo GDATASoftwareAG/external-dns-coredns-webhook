@@ -1,4 +1,4 @@
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 COPY . /code/external-dns-coredns-webhook
 WORKDIR /code/external-dns-coredns-webhook
